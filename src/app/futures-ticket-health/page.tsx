@@ -15,6 +15,7 @@ type Leg = {
   bet: string;
   originalOdds: string; // American, e.g. +150 or -110
   currentOdds: string;
+  won: boolean;
 };
 
 function parseAmerican(raw: string): number | null {
@@ -96,7 +97,7 @@ function newId() {
 export default function FuturesTicketHealthPage() {
   const [stake, setStake] = useState("15");
   const [legs, setLegs] = useState<Leg[]>([
-    { id: newId(), bet: "", originalOdds: "", currentOdds: "" },
+    { id: newId(), bet: "", originalOdds: "", currentOdds: "", won: false },
   ]);
   const [showValue, setShowValue] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -108,7 +109,14 @@ export default function FuturesTicketHealthPage() {
       if (raw) {
         const data = JSON.parse(raw);
         if (data.stake) setStake(String(data.stake));
-        if (Array.isArray(data.legs) && data.legs.length) setLegs(data.legs);
+        if (Array.isArray(data.legs) && data.legs.length) {
+          setLegs(
+            data.legs.map((l: Leg) => ({
+              ...l,
+              won: Boolean(l.won),
+            }))
+          );
+        }
       }
     } catch {
       /* ignore */
@@ -131,7 +139,7 @@ export default function FuturesTicketHealthPage() {
   function addLeg() {
     setLegs((prev) => [
       ...prev,
-      { id: newId(), bet: "", originalOdds: "", currentOdds: "" },
+      { id: newId(), bet: "", originalOdds: "", currentOdds: "", won: false },
     ]);
     setShowValue(false);
   }
@@ -147,40 +155,86 @@ export default function FuturesTicketHealthPage() {
       o: parseAmerican(l.originalOdds),
       c: parseAmerican(l.currentOdds),
     }));
-    const complete = parsed.filter((l) => l.o !== null && l.c !== null);
-    if (complete.length === 0) {
-      return null;
-    }
+    // Original ticket needs original odds on every leg (won or not)
+    const withOrig = parsed.filter((l) => l.o !== null);
+    if (withOrig.length === 0) return null;
 
     let origDec = 1;
-    let currDec = 1;
-    const legRows = complete.map((l) => {
-      const o = l.o!;
-      const c = l.c!;
-      origDec *= americanToDecimal(o);
-      currDec *= americanToDecimal(c);
-      const heat = legHeat(o, c);
-      return { ...l, heat, origDec: americanToDecimal(o), currDec: americanToDecimal(c) };
-    });
+    for (const l of withOrig) {
+      origDec *= americanToDecimal(l.o!);
+    }
+
+    // Rows for display: won legs = 100% heat; open need current odds
+    const legRows = parsed.map((l) => {
+      if (l.won && l.o !== null) {
+        return {
+          ...l,
+          heat: {
+            pct: 100,
+            label: "Won",
+            color: "bg-emerald-500",
+            text: "text-emerald-400",
+          },
+          origDec: americanToDecimal(l.o),
+          currDec: 1, // settled
+        };
+      }
+      if (l.o !== null && l.c !== null) {
+        const heat = legHeat(l.o, l.c);
+        return {
+          ...l,
+          heat,
+          origDec: americanToDecimal(l.o),
+          currDec: americanToDecimal(l.c),
+        };
+      }
+      return null;
+    }).filter(Boolean) as Array<
+      Leg & {
+        o: number | null;
+        c: number | null;
+        heat: { pct: number; label: string; color: string; text: string };
+        origDec: number;
+        currDec: number;
+      }
+    >;
+
+    if (legRows.length === 0) return null;
+
+    // Remaining open legs only (not won) for rebuild cost
+    const openRows = legRows.filter((l) => !l.won && l.c !== null);
+    let openCurrDec = 1;
+    for (const l of openRows) {
+      openCurrDec *= l.currDec;
+    }
 
     const stakeN = Number(stake) || 0;
     const originalPayout = stakeN * origDec;
     const originalProfit = originalPayout - stakeN;
-    // Stake needed now at current odds to get the SAME payout
-    const currentValue = currDec > 1 ? originalPayout / currDec : 0;
-    // What same stake would pay now
-    const payoutIfSameStake = stakeN * currDec;
 
-    // Overall health: average of leg heats
+    // Cost today to hit SAME payout using only remaining legs at current odds
+    let currentValue = 0;
+    if (openRows.length === 0) {
+      // All won — ticket already pays; no rebuild needed
+      currentValue = 0;
+    } else if (openCurrDec > 1) {
+      currentValue = originalPayout / openCurrDec;
+    }
+
+    const payoutIfSameStake =
+      openRows.length === 0 ? originalPayout : stakeN * openCurrDec;
+
     const health = Math.round(
       legRows.reduce((s, r) => s + r.heat.pct, 0) / legRows.length
     );
 
     return {
       legRows,
-      incomplete: parsed.length - complete.length,
+      openCount: openRows.length,
+      wonCount: legRows.filter((l) => l.won).length,
+      incomplete: parsed.filter((l) => !l.won && (l.o === null || l.c === null)).length,
       origDec,
-      currDec,
+      openCurrDec,
       stakeN,
       originalPayout,
       originalProfit,
@@ -188,7 +242,8 @@ export default function FuturesTicketHealthPage() {
       payoutIfSameStake,
       health,
       combinedOrigAmerican: decimalToAmerican(origDec),
-      combinedCurrAmerican: decimalToAmerican(currDec),
+      combinedOpenAmerican: decimalToAmerican(openCurrDec),
+      allWon: openRows.length === 0 && legRows.every((l) => l.won),
     };
   }, [legs, stake]);
 
@@ -317,15 +372,30 @@ export default function FuturesTicketHealthPage() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-zinc-500 font-medium">Leg {idx + 1}</span>
-                    {legs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeLeg(leg.id)}
-                        className="text-xs text-zinc-500 hover:text-red-400"
-                      >
-                        Remove
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={leg.won}
+                          onChange={(e) => {
+                            updateLeg(leg.id, { won: e.target.checked });
+                          }}
+                          className="rounded border-zinc-600"
+                        />
+                        <span className={leg.won ? "text-emerald-400 font-semibold" : ""}>
+                          Won
+                        </span>
+                      </label>
+                      {legs.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeLeg(leg.id)}
+                          className="text-xs text-zinc-500 hover:text-red-400"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px] gap-3">
                     <div>
@@ -367,21 +437,29 @@ export default function FuturesTicketHealthPage() {
                       />
                     </div>
                   </div>
-                  {heat && (
+                  {(leg.won || heat) && (
                     <div className="flex items-center gap-3 pt-1">
                       <div className="flex-1 h-2 rounded-full bg-zinc-800 overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${heat.color}`}
-                          style={{ width: `${heat.pct}%` }}
+                          className={`h-full rounded-full ${
+                            leg.won ? "bg-emerald-500" : heat!.color
+                          }`}
+                          style={{ width: `${leg.won ? 100 : heat!.pct}%` }}
                         />
                       </div>
                       <div
-                        className={`text-xs font-semibold tabular-nums min-w-[3rem] text-right ${heat.text}`}
+                        className={`text-xs font-semibold tabular-nums min-w-[3rem] text-right ${
+                          leg.won ? "text-emerald-400" : heat!.text
+                        }`}
                       >
-                        {heat.pct}%
+                        {leg.won ? 100 : heat!.pct}%
                       </div>
-                      <div className={`text-[10px] uppercase tracking-wide ${heat.text}`}>
-                        {heat.label}
+                      <div
+                        className={`text-[10px] uppercase tracking-wide ${
+                          leg.won ? "text-emerald-400" : heat!.text
+                        }`}
+                      >
+                        {leg.won ? "Won" : heat!.label}
                       </div>
                     </div>
                   )}
@@ -405,22 +483,22 @@ export default function FuturesTicketHealthPage() {
               <div>
                 <h3 className="text-sm font-semibold">Same-payout rebuild cost</h3>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  What you&apos;d need to risk today at current odds to match your original
-                  payout (${analysis.originalPayout.toLocaleString(undefined, {
-                    maximumFractionDigits: 2,
-                  })}
-                  ).
+                  {analysis.allWon
+                    ? "All legs won — ticket is a winner. No rebuild needed."
+                    : `Cost to rebuild the same $${analysis.originalPayout.toLocaleString(undefined, { maximumFractionDigits: 2 })} payout using only the ${analysis.openCount} remaining open leg${analysis.openCount === 1 ? "" : "s"} at current odds (won legs excluded).`}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowValue(true)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg"
-              >
-                Generate Current Value
-              </button>
+              {!analysis.allWon && (
+                <button
+                  type="button"
+                  onClick={() => setShowValue(true)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg"
+                >
+                  Generate Current Value
+                </button>
+              )}
             </div>
-            {showValue && (
+            {showValue && !analysis.allWon && (
               <div className="grid sm:grid-cols-3 gap-4 pt-2 border-t border-zinc-800">
                 <div>
                   <div className="text-[10px] text-zinc-500 uppercase">Current value</div>
@@ -431,7 +509,7 @@ export default function FuturesTicketHealthPage() {
                     })}
                   </div>
                   <div className="text-[11px] text-zinc-600 mt-1">
-                    Stake now for same payout
+                    Stake on remaining legs for same payout
                   </div>
                 </div>
                 <div>
@@ -454,13 +532,13 @@ export default function FuturesTicketHealthPage() {
                   </div>
                 </div>
                 <div className="sm:col-span-3 text-xs text-zinc-500">
-                  Combined was {analysis.combinedOrigAmerican} → now{" "}
-                  {analysis.combinedCurrAmerican}. Same ${analysis.stakeN} stake today would
-                  pay $
-                  {analysis.payoutIfSameStake.toLocaleString(undefined, {
-                    maximumFractionDigits: 2,
-                  })}
-                  .
+                  Full ticket was {analysis.combinedOrigAmerican}
+                  {analysis.wonCount > 0
+                    ? ` · ${analysis.wonCount} leg${analysis.wonCount === 1 ? "" : "s"} already won`
+                    : ""}
+                  {" · "}
+                  remaining combined {analysis.combinedOpenAmerican}. Won legs are not in this
+                  rebuild price.
                 </div>
               </div>
             )}
