@@ -390,13 +390,13 @@ export default function HomePage() {
                 <p className="text-xs text-zinc-500">Live ticket health & hedge tool</p>
               </div>
             </div>
-            <nav className="hidden sm:flex gap-4 text-sm">
-              <Link href="/" className="text-emerald-400 font-medium">
-                Ticket Health
-              </Link>
-              <Link href="/save-the-unit" className="text-zinc-400 hover:text-white transition">
-                Save the Unit
-              </Link>
+            <nav className="hidden md:flex gap-3 text-sm flex-wrap">
+              <Link href="/" className="text-emerald-400 font-medium">Ticket Health</Link>
+              <Link href="/save-the-unit" className="text-zinc-400 hover:text-white">Save the Unit</Link>
+              <Link href="/pga-groupings" className="text-zinc-400 hover:text-white">PGA</Link>
+              <Link href="/mlb-tracker" className="text-zinc-400 hover:text-white">MLB</Link>
+              <Link href="/nfl-tracker" className="text-zinc-400 hover:text-white">NFL</Link>
+              <Link href="/prop-watch" className="text-zinc-400 hover:text-white">Prop Watch</Link>
             </nav>
           </div>
           <div className="text-right text-xs text-zinc-500">
