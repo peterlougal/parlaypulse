@@ -286,13 +286,53 @@ export default function HomePage() {
     const live = findLiveOddsForLeg(leg);
     const currentOdds = live?.price ?? null;
     const lineMoved = live?.lineMoved ?? false;
-    // Exact match → real implied. Line moved / missing → Hazard at 10%
+    const livePoint = live?.point as number | undefined;
+
     let implied: number | null = null;
-    if (lineMoved) {
-      implied = 0.10;
-    } else if (currentOdds !== null) {
+    let isHazard = false;
+    let lineFavorable = false;
+
+    if (!lineMoved && currentOdds !== null) {
+      // Exact / near point match — use real price
       implied = americanToImpliedProb(currentOdds);
+      isHazard = implied <= 0.5;
+    } else if (lineMoved && livePoint !== undefined && leg.point !== undefined) {
+      // Directional logic for moved totals/spreads
+      const sel = leg.selection.toLowerCase();
+      if (leg.market === "totals") {
+        if (sel.startsWith("over")) {
+          // Over X: if live main > X → favorable; if live main < X → hazard
+          if (livePoint > leg.point + 0.25) {
+            implied = 0.80;
+            lineFavorable = true;
+          } else if (livePoint < leg.point - 0.25) {
+            implied = 0.10;
+            isHazard = true;
+          } else {
+            implied = 0.50;
+          }
+        } else {
+          // Under X: if live main < X → favorable; if live main > X → hazard
+          if (livePoint < leg.point - 0.25) {
+            implied = 0.80;
+            lineFavorable = true;
+          } else if (livePoint > leg.point + 0.25) {
+            implied = 0.10;
+            isHazard = true;
+          } else {
+            implied = 0.50;
+          }
+        }
+      } else {
+        // Spreads: keep simple hazard for now
+        implied = 0.10;
+        isHazard = true;
+      }
+    } else if (lineMoved) {
+      implied = 0.10;
+      isHazard = true;
     }
+
     return {
       leg,
       currentOdds,
@@ -301,8 +341,9 @@ export default function HomePage() {
       livePriceFound: !!live,
       book: live?.book,
       lineMoved,
-      livePoint: live?.point,
-      isHazard: lineMoved || (implied !== null && implied <= 0.5),
+      livePoint,
+      isHazard,
+      lineFavorable,
     };
   });
 
@@ -537,23 +578,9 @@ export default function HomePage() {
                 return (
                   <div
                     key={leg.id}
-                    className="flex flex-wrap items-center justify-between gap-3 bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-4 py-3"
+                    className="flex items-center gap-3 bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-4 py-3"
                   >
-                    {/* Per-leg status color box */}
-                    <div
-                      className={`w-2.5 h-10 rounded-sm shrink-0 ${legStatusColor(status.impliedProb, status.isHazard)}`}
-                      title={
-                        status.impliedProb === null
-                          ? "Unknown"
-                          : status.isHazard
-                          ? "Hazard"
-                          : status.impliedProb >= 0.75
-                          ? "Strong"
-                          : "Moderate"
-                      }
-                    />
-
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 pr-2">
                       <div className="text-sm font-medium">
                         {leg.awayTeam} @ {leg.homeTeam}
                       </div>
@@ -570,24 +597,35 @@ export default function HomePage() {
                         <div>
                           <div className="text-sm font-mono">
                             {status.lineMoved ? (
-                              <span className="text-red-400">Hazard</span>
+                              status.lineFavorable ? (
+                                <span className="text-emerald-400">Line moved · Favorable</span>
+                              ) : status.isHazard ? (
+                                <span className="text-red-400">Hazard</span>
+                              ) : (
+                                <span className="text-amber-400">Line moved</span>
+                              )
                             ) : (
                               <>Live {formatAmericanOdds(status.currentOdds!)}</>
                             )}
                             {status.lineMoved && status.livePoint !== undefined && (
-                              <span className="ml-1 text-xs text-amber-400 font-sans">
+                              <span className="ml-1 text-xs text-zinc-400 font-sans">
                                 (main {status.livePoint})
                               </span>
                             )}
                           </div>
                           <div className="text-xs text-zinc-400">
                             {formatPercent(status.impliedProb)}
-                            {status.lineMoved ? " forced" : " implied"}
+                            {status.lineMoved ? " est." : " implied"}
                             {!status.lineMoved && status.book ? ` · ${status.book}` : ""}
                           </div>
-                          {status.lineMoved && (
+                          {status.lineMoved && status.isHazard && (
                             <div className="text-[10px] text-red-400 mt-0.5">
                               Original line not available
+                            </div>
+                          )}
+                          {status.lineMoved && status.lineFavorable && (
+                            <div className="text-[10px] text-emerald-400 mt-0.5">
+                              Main line past your number
                             </div>
                           )}
                         </div>
@@ -598,9 +636,31 @@ export default function HomePage() {
                       )}
                     </div>
 
+                    {/* Per-leg status square */}
+                    <div
+                      className={`shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-xs font-bold text-zinc-950 ${legStatusColor(status.impliedProb, status.isHazard)}`}
+                      title={
+                        status.impliedProb === null
+                          ? "Unknown"
+                          : status.isHazard
+                          ? "Hazard"
+                          : status.lineFavorable
+                          ? "Favorable"
+                          : status.impliedProb >= 0.75
+                          ? "Strong"
+                          : "Moderate"
+                      }
+                    >
+                      {status.impliedProb === null
+                        ? "—"
+                        : status.isHazard
+                        ? "HAZ"
+                        : `${Math.round(status.impliedProb * 100)}%`}
+                    </div>
+
                     <button
                       onClick={() => removeLeg(leg.id)}
-                      className="text-zinc-500 hover:text-red-400 text-sm px-2"
+                      className="text-zinc-500 hover:text-red-400 text-sm px-1.5 shrink-0"
                       title="Remove leg"
                     >
                       ✕
@@ -627,7 +687,7 @@ export default function HomePage() {
                 {formatPercent(combinedCurrentProb)}
               </span>
             </div>
-            <div className="h-3 w-full rounded-full bg-zinc-800 overflow-hidden">
+            <div className="h-8 w-full rounded-full bg-zinc-800 overflow-hidden border border-zinc-700">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${healthBarColor(combinedCurrentProb)}`}
                 style={{ width: healthBarWidth(combinedCurrentProb) }}
