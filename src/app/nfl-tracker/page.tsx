@@ -5,9 +5,8 @@ import Link from "next/link";
 
 /**
  * Hall of Fame Game — Aug 6, 2026
- * Carolina Panthers vs Arizona Cardinals · 8:00 PM ET · Canton, OH
- * Player lists are skill-position focused for prop tracking (preseason depth varies).
- * Live stat bars can be wired later; structure + favorites work now.
+ * Carolina vs Arizona · 8:00 PM ET · Canton, OH
+ * Favorited O/U lines become trackable items with score progress bars.
  */
 
 type PropKey =
@@ -69,7 +68,6 @@ type Player = {
 };
 
 const PLAYERS: Player[] = [
-  // Carolina — offense
   { id: "car-qb1", name: "Bryce Young", pos: "QB", team: "CAR", group: "offense" },
   { id: "car-rb1", name: "Chuba Hubbard", pos: "RB", team: "CAR", group: "offense" },
   { id: "car-rb2", name: "Rico Dowdle", pos: "RB", team: "CAR", group: "offense" },
@@ -81,7 +79,6 @@ const PLAYERS: Player[] = [
   { id: "car-lb1", name: "Shaq Thompson", pos: "LB", team: "CAR", group: "defense" },
   { id: "car-edge1", name: "Derrick Brown", pos: "DL", team: "CAR", group: "defense" },
   { id: "car-cb1", name: "Jaycee Horn", pos: "CB", team: "CAR", group: "defense" },
-  // Arizona — offense
   { id: "ari-qb1", name: "Kyler Murray", pos: "QB", team: "ARI", group: "offense" },
   { id: "ari-rb1", name: "James Conner", pos: "RB", team: "ARI", group: "offense" },
   { id: "ari-rb2", name: "Trey Benson", pos: "RB", team: "ARI", group: "offense" },
@@ -95,13 +92,23 @@ const PLAYERS: Player[] = [
   { id: "ari-cb1", name: "Max Melton", pos: "CB", team: "ARI", group: "defense" },
 ];
 
-const GAME_LINES = [
-  { id: "car-ml", label: "Carolina ML", team: "CAR" },
-  { id: "ari-ml", label: "Arizona ML", team: "ARI" },
-  { id: "over-35.5", label: "Over 35.5", team: "TOT" },
-  { id: "under-35.5", label: "Under 35.5", team: "TOT" },
-  { id: "car-spread", label: "Carolina -1.5", team: "CAR" },
-  { id: "ari-spread", label: "Arizona +1.5", team: "ARI" },
+type LineKind = "ml" | "spread" | "over" | "under";
+
+type GameLine = {
+  id: string;
+  label: string;
+  kind: LineKind;
+  team?: "CAR" | "ARI";
+  line: number; // total for O/U, spread number for spread (positive = underdog side)
+};
+
+const GAME_LINES: GameLine[] = [
+  { id: "car-ml", label: "Carolina ML", kind: "ml", team: "CAR", line: 0 },
+  { id: "ari-ml", label: "Arizona ML", kind: "ml", team: "ARI", line: 0 },
+  { id: "over-35.5", label: "Over 35.5", kind: "over", line: 35.5 },
+  { id: "under-35.5", label: "Under 35.5", kind: "under", line: 35.5 },
+  { id: "car-spread", label: "Carolina -1.5", kind: "spread", team: "CAR", line: -1.5 },
+  { id: "ari-spread", label: "Arizona +1.5", kind: "spread", team: "ARI", line: 1.5 },
 ];
 
 function propsFor(group: Group) {
@@ -110,12 +117,145 @@ function propsFor(group: Group) {
   return OFFENSE_PROPS;
 }
 
+function defaultProp(pos: string, group: Group): PropKey {
+  if (group === "kicker") return "fg_1.5";
+  if (group === "defense") {
+    if (pos === "CB") return "int_0.5";
+    if (pos === "EDGE" || pos === "DL") return "sacks_0.5";
+    return "tackles_5.5";
+  }
+  if (pos === "QB") return "pass_yds_225.5";
+  if (pos === "RB") return "rush_yds_45.5";
+  if (pos === "WR" || pos === "TE") return "rec_yds_35.5";
+  return "anytime_td";
+}
+
+function lineProgress(
+  line: GameLine,
+  car: number,
+  ari: number,
+  final: boolean
+): { pct: number; label: string; hit: boolean | null; color: string } {
+  const total = car + ari;
+  const margin = car - ari; // positive = CAR winning
+
+  if (line.kind === "over") {
+    const need = Math.ceil(line.line); // need 36 to clear 35.5
+    const pct = Math.min(100, Math.round((total / need) * 100));
+    const hit = total > line.line;
+    if (final) {
+      return {
+        pct: hit ? 100 : pct,
+        label: hit ? `HIT · ${total} total` : `MISS · ${total} total (need > ${line.line})`,
+        hit,
+        color: hit ? "bg-emerald-500" : "bg-red-500",
+      };
+    }
+    return {
+      pct,
+      label: `${total} pts · need > ${line.line} (${need}+)`,
+      hit: hit ? true : null,
+      color: hit ? "bg-emerald-500" : pct >= 70 ? "bg-amber-400" : "bg-cyan-500",
+    };
+  }
+
+  if (line.kind === "under") {
+    // Under is "alive" while under the line; bar shows room left
+    const room = line.line - total;
+    const pctUsed = Math.min(100, Math.round((total / line.line) * 100));
+    const hit = total < line.line;
+    if (final) {
+      return {
+        pct: hit ? 100 : pctUsed,
+        label: hit ? `HIT · ${total} total` : `MISS · ${total} total (needed < ${line.line})`,
+        hit,
+        color: hit ? "bg-emerald-500" : "bg-red-500",
+      };
+    }
+    const busted = total > line.line;
+    return {
+      pct: busted ? 100 : pctUsed,
+      label: busted
+        ? `BUSTED · ${total} already over ${line.line}`
+        : `${total} pts · ${room.toFixed(1)} under the line left`,
+      hit: busted ? false : null,
+      color: busted ? "bg-red-500" : pctUsed >= 85 ? "bg-amber-400" : "bg-cyan-500",
+    };
+  }
+
+  if (line.kind === "ml" && line.team) {
+    const winning = line.team === "CAR" ? margin > 0 : margin < 0;
+    const tied = margin === 0;
+    if (car === 0 && ari === 0 && !final) {
+      return { pct: 0, label: "Pregame · waiting for kickoff", hit: null, color: "bg-zinc-600" };
+    }
+    if (final) {
+      return {
+        pct: winning ? 100 : 0,
+        label: winning ? `HIT · ${line.team} wins` : `MISS · final ${car}–${ari}`,
+        hit: winning,
+        color: winning ? "bg-emerald-500" : "bg-red-500",
+      };
+    }
+    return {
+      pct: winning ? 70 : tied ? 35 : 15,
+      label: tied
+        ? `Tied ${car}–${ari}`
+        : winning
+        ? `${line.team} leading · ${car}–${ari}`
+        : `${line.team} trailing · ${car}–${ari}`,
+      hit: null,
+      color: winning ? "bg-emerald-400" : tied ? "bg-amber-400" : "bg-red-400",
+    };
+  }
+
+  if (line.kind === "spread" && line.team) {
+    // CAR -1.5 means CAR must win by 2+. ARI +1.5 means ARI can lose by 1 and still cover.
+    const cover =
+      line.team === "CAR" ? margin > Math.abs(line.line) : margin < -line.line || margin + line.line > 0
+        ? line.team === "ARI"
+          ? ari + line.line > car // ARI +1.5 covers if ARI score + 1.5 > CAR
+          : false
+        : false;
+    // Cleaner cover math:
+    const carCovers = margin > 1.5; // -1.5
+    const ariCovers = -margin < 1.5; // +1.5 → CAR lead less than 1.5 means ARI covers (margin <= 1)
+    const covers = line.team === "CAR" ? carCovers : ariCovers;
+
+    if (car === 0 && ari === 0 && !final) {
+      return { pct: 0, label: "Pregame · waiting for kickoff", hit: null, color: "bg-zinc-600" };
+    }
+    if (final) {
+      return {
+        pct: covers ? 100 : 0,
+        label: covers ? `HIT · covers · ${car}–${ari}` : `MISS · ${car}–${ari}`,
+        hit: covers,
+        color: covers ? "bg-emerald-500" : "bg-red-500",
+      };
+    }
+    return {
+      pct: covers ? 70 : 25,
+      label: covers
+        ? `Covering · ${car}–${ari}`
+        : `Not covering · ${car}–${ari}`,
+      hit: null,
+      color: covers ? "bg-emerald-400" : "bg-amber-400",
+    };
+  }
+
+  return { pct: 0, label: "—", hit: null, color: "bg-zinc-600" };
+}
+
 export default function NflTrackerPage() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favProps, setFavProps] = useState<Record<string, PropKey>>({});
   const [lineFavs, setLineFavs] = useState<Set<string>>(new Set());
   const [showFavOnly, setShowFavOnly] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Live-ish score — manual for MVP until feed is wired; defaults 0–0 pregame
+  const [carScore, setCarScore] = useState(0);
+  const [ariScore, setAriScore] = useState(0);
+  const [isFinal, setIsFinal] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -146,15 +286,14 @@ export default function NflTrackerPage() {
     localStorage.setItem("pp-nfl-line-favs", JSON.stringify([...lineFavs]));
   }, [lineFavs, mounted]);
 
-  function toggleFav(id: string, group: Group) {
+  function toggleFav(id: string, pos: string, group: Group) {
     setFavorites((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else {
         next.add(id);
         if (!favProps[id]) {
-          const defaults = propsFor(group);
-          setFavProps((fp) => ({ ...fp, [id]: defaults[0].key }));
+          setFavProps((fp) => ({ ...fp, [id]: defaultProp(pos, group) }));
         }
       }
       return next;
@@ -172,10 +311,11 @@ export default function NflTrackerPage() {
 
   const favPlayers = PLAYERS.filter((p) => favorites.has(p.id));
   const other = showFavOnly ? [] : PLAYERS.filter((p) => !favorites.has(p.id));
+  const trackedLines = GAME_LINES.filter((g) => lineFavs.has(g.id));
 
   function PlayerRow({ p, isFav }: { p: Player; isFav: boolean }) {
     const opts = propsFor(p.group);
-    const prop = favProps[p.id] || opts[0].key;
+    const prop = favProps[p.id] || defaultProp(p.pos, p.group);
     return (
       <div
         className={`flex flex-col gap-2 px-4 py-3 border-b border-zinc-800/80 last:border-0 ${
@@ -184,7 +324,7 @@ export default function NflTrackerPage() {
       >
         <div className="flex items-center gap-3">
           <button
-            onClick={() => toggleFav(p.id, p.group)}
+            onClick={() => toggleFav(p.id, p.pos, p.group)}
             className={`text-lg leading-none ${
               isFav ? "text-amber-400" : "text-zinc-600 hover:text-zinc-400"
             }`}
@@ -215,10 +355,10 @@ export default function NflTrackerPage() {
               ))}
             </select>
             <div className="mt-2 h-2 w-full rounded-full bg-zinc-800">
-              <div className="h-full w-0 rounded-full bg-zinc-600" title="Live stats after kickoff" />
+              <div className="h-full w-0 rounded-full bg-zinc-600" />
             </div>
             <div className="text-[10px] text-zinc-600 mt-1">
-              Progress bar fills when live stats are available
+              Player prop bar fills when live stats are available
             </div>
           </div>
         )}
@@ -261,7 +401,7 @@ export default function NflTrackerPage() {
                 Carolina Panthers vs Arizona Cardinals · 8:00 PM ET · Canton, OH
               </p>
               <p className="text-xs text-zinc-600 mt-1">
-                Line: CAR −1.5 · O/U 35.5 (pregame reference)
+                Line: CAR −1.5 · O/U 35.5
               </p>
             </div>
             <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
@@ -274,9 +414,48 @@ export default function NflTrackerPage() {
               Favorites only
             </label>
           </div>
+
+          {/* Score controls — MVP until live feed */}
+          <div className="mt-5 flex flex-wrap items-end gap-4 border-t border-zinc-800 pt-4">
+            <div>
+              <label className="block text-[10px] text-zinc-500 mb-1">CAR score</label>
+              <input
+                type="number"
+                min={0}
+                value={carScore}
+                onChange={(e) => setCarScore(Number(e.target.value) || 0)}
+                className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 mb-1">ARI score</label>
+              <input
+                type="number"
+                min={0}
+                value={ariScore}
+                onChange={(e) => setAriScore(Number(e.target.value) || 0)}
+                className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div className="text-sm font-mono text-zinc-300 pb-1.5">
+              Total: {carScore + ariScore}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-zinc-400 pb-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isFinal}
+                onChange={(e) => setIsFinal(e.target.checked)}
+                className="rounded border-zinc-600"
+              />
+              Final
+            </label>
+            <p className="text-[10px] text-zinc-600 w-full">
+              Score is manual for MVP — update as the game goes. O/U bars use total points.
+            </p>
+          </div>
         </section>
 
-        {/* Game lines */}
+        {/* Game line chips */}
         <section>
           <h3 className="text-sm font-semibold text-zinc-400 mb-2 px-1">Game lines</h3>
           <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3 flex flex-wrap gap-2">
@@ -300,6 +479,48 @@ export default function NflTrackerPage() {
           </div>
         </section>
 
+        {/* Tracked game lines with status bars */}
+        {trackedLines.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold text-amber-400 mb-2 px-1">
+              ★ Your game lines ({trackedLines.length})
+            </h3>
+            <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden divide-y divide-zinc-800/80">
+              {trackedLines.map((line) => {
+                const prog = lineProgress(line, carScore, ariScore, isFinal);
+                return (
+                  <div key={line.id} className="px-4 py-3 bg-emerald-950/10">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => toggleLine(line.id)}
+                          className="text-amber-400 text-lg leading-none"
+                        >
+                          ★
+                        </button>
+                        <span className="text-sm font-medium">{line.label}</span>
+                      </div>
+                      {prog.hit === true && (
+                        <span className="text-xs font-semibold text-emerald-400">HIT</span>
+                      )}
+                      {prog.hit === false && (
+                        <span className="text-xs font-semibold text-red-400">MISS</span>
+                      )}
+                    </div>
+                    <div className="h-3 w-full rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${prog.color}`}
+                        style={{ width: `${Math.max(prog.pct, prog.pct > 0 ? 4 : 0)}%` }}
+                      />
+                    </div>
+                    <div className="text-[11px] text-zinc-400 mt-1.5">{prog.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {favPlayers.length > 0 && (
           <section>
             <h3 className="text-sm font-semibold text-amber-400 mb-2 px-1">
@@ -316,27 +537,35 @@ export default function NflTrackerPage() {
         {!showFavOnly && (
           <>
             <section>
-              <h3 className="text-sm font-semibold text-zinc-400 mb-2 px-1">Carolina · Offense / ST / Defense</h3>
+              <h3 className="text-sm font-semibold text-zinc-400 mb-2 px-1">
+                Carolina · Offense / ST / Defense
+              </h3>
               <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden">
-                {other.filter((p) => p.team === "CAR").map((p) => (
-                  <PlayerRow key={p.id} p={p} isFav={false} />
-                ))}
+                {other
+                  .filter((p) => p.team === "CAR")
+                  .map((p) => (
+                    <PlayerRow key={p.id} p={p} isFav={false} />
+                  ))}
               </div>
             </section>
             <section>
-              <h3 className="text-sm font-semibold text-zinc-400 mb-2 px-1">Arizona · Offense / ST / Defense</h3>
+              <h3 className="text-sm font-semibold text-zinc-400 mb-2 px-1">
+                Arizona · Offense / ST / Defense
+              </h3>
               <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden">
-                {other.filter((p) => p.team === "ARI").map((p) => (
-                  <PlayerRow key={p.id} p={p} isFav={false} />
-                ))}
+                {other
+                  .filter((p) => p.team === "ARI")
+                  .map((p) => (
+                    <PlayerRow key={p.id} p={p} isFav={false} />
+                  ))}
               </div>
             </section>
           </>
         )}
 
         <footer className="text-center text-xs text-zinc-600 pt-4 pb-6">
-          Preseason depth charts change — star who you&apos;re on. Live stat bars come after kickoff wiring.
-          Favorites sync to Prop Watch.
+          Star Over/Under to track total points on a status bar. Score is manual for MVP; live feed
+          later. Favorites sync to Prop Watch.
         </footer>
       </main>
     </div>
