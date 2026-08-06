@@ -199,6 +199,13 @@ function lineBar(
 export default function PropWatchPage() {
   const [items, setItems] = useState<WatchItem[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [tick, setTick] = useState(0);
+
+  // Auto-refresh every 90 seconds while page is open
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 90_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -407,7 +414,7 @@ export default function PropWatchPage() {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [tick]);
 
   const bySport = {
     NFL: items.filter((i) => i.sport === "NFL"),
@@ -597,8 +604,7 @@ export default function PropWatchPage() {
         })}
 
         <footer className="text-center text-xs text-zinc-600 pt-4 pb-6">
-          MLB bars use last stats from MLB Tracker. Visit MLB Tracker to refresh names/stats, then
-          reopen Prop Watch.
+          Auto-updates every 90 seconds while this page is open. No refresh button.
         </footer>
       </main>
     </div>
