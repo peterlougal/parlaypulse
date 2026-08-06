@@ -254,13 +254,13 @@ export default function SaveTheUnitPage() {
                 <p className="text-xs text-zinc-500">Save the Unit</p>
               </div>
             </Link>
-            <nav className="hidden sm:flex gap-4 text-sm">
-              <Link href="/" className="text-zinc-400 hover:text-white transition">
-                Ticket Health
-              </Link>
-              <Link href="/save-the-unit" className="text-emerald-400 font-medium">
-                Save the Unit
-              </Link>
+            <nav className="hidden md:flex gap-3 text-sm flex-wrap">
+              <Link href="/" className="text-zinc-400 hover:text-white">Ticket Health</Link>
+              <Link href="/save-the-unit" className="text-emerald-400 font-medium">Save the Unit</Link>
+              <Link href="/pga-groupings" className="text-zinc-400 hover:text-white">PGA</Link>
+              <Link href="/mlb-tracker" className="text-zinc-400 hover:text-white">MLB</Link>
+              <Link href="/nfl-tracker" className="text-zinc-400 hover:text-white">NFL</Link>
+              <Link href="/prop-watch" className="text-zinc-400 hover:text-white">Prop Watch</Link>
             </nav>
           </div>
           <div className="text-right text-xs text-zinc-500">
