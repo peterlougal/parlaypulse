@@ -119,12 +119,20 @@ function mlbProgress(
     "k_6.5": { cur: meta.strikeOuts, need: 7 },
   };
   const m = map[prop] || { cur: 0, need: 1 };
-  const hit = m.cur >= m.need;
-  const pct = Math.min(100, Math.round((m.cur / m.need) * 100));
-  const color = hit ? "bg-emerald-500" : pct >= 67 ? "bg-emerald-400" : pct >= 34 ? "bg-amber-400" : "bg-red-500";
+  const cleared = m.cur >= m.need;
+  const pct = Math.min(100, Math.round((m.cur / Math.max(m.need, 1)) * 100));
+  // Only mark HIT when cleared. In-progress is null (not a MISS) so health uses real %.
+  const hit: boolean | null = cleared ? true : null;
+  const color = cleared
+    ? "bg-emerald-500"
+    : pct >= 67
+    ? "bg-emerald-400"
+    : pct >= 34
+    ? "bg-amber-400"
+    : "bg-cyan-500";
   return {
-    pct: hit ? 100 : pct,
-    label: `${m.cur} / need ${m.need}${hit ? " · HIT" : ""}`,
+    pct: cleared ? 100 : pct,
+    label: `${m.cur} / need ${m.need}${cleared ? " · HIT" : ""}`,
     hit,
     color,
   };
@@ -410,7 +418,16 @@ export default function PropWatchPage() {
 
   // Ticket health = average progress across all tracked legs
   // HIT = 100, MISS = 0, in-progress uses pct, missing data skipped
-  const scored = items.filter((i) => typeof i.pct === "number" || i.hit === true || i.hit === false);
+  // Score legs that have real progress (skip NFL player placeholders with 0% and no stats yet)
+  const scored = items.filter((i) => {
+    if (i.hit === true || i.hit === false) return true;
+    if (typeof i.pct !== "number") return false;
+    // NFL player props without a live feed still show 0 — don't drag health down
+    if (i.sport === "NFL" && i.pct === 0 && !i.barLabel?.includes("pts") && !i.barLabel?.includes("/"))
+      return false;
+    if (i.sport === "NFL" && i.barLabel === "Live player stats after kickoff feed") return false;
+    return true;
+  });
   let health: number | null = null;
   let hits = 0;
   let misses = 0;
