@@ -98,7 +98,7 @@ function mlbProgress(
     stolenBases: number;
     strikeOuts: number;
   }
-): { pct: number; label: string; hit: boolean; color: string } {
+): { pct: number; label: string; hit: boolean | null; color: string } {
   const map: Record<string, { cur: number; need: number }> = {
     "hits_0.5": { cur: meta.hits, need: 1 },
     "hits_1.5": { cur: meta.hits, need: 2 },
