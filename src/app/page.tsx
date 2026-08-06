@@ -229,6 +229,7 @@ export default function HomePage() {
 
       const sel = leg.selection.toLowerCase();
 
+      // Prefer close point match
       let outcome = mkt.outcomes.find((o: any) => {
         const name = (o.name || "").toLowerCase();
         const nameMatch =
@@ -239,15 +240,16 @@ export default function HomePage() {
           (sel === "under" && name.startsWith("under"));
 
         if (!nameMatch) return false;
-
         if (leg.market === "h2h") return true;
-
         if (leg.point === undefined) return true;
         const pt = o.point;
         if (pt === undefined || pt === null) return true;
         return Math.abs(Number(pt) - Number(leg.point)) < 0.51;
       });
 
+      let lineMoved = false;
+
+      // Fallback: same side but different point (line moved)
       if (!outcome && (leg.market === "totals" || leg.market === "spreads")) {
         outcome = mkt.outcomes.find((o: any) => {
           const name = (o.name || "").toLowerCase();
@@ -259,14 +261,16 @@ export default function HomePage() {
             (sel === "under" && name.startsWith("under"))
           );
         });
+        if (outcome) lineMoved = true;
       }
 
       if (outcome) {
         return {
           price: outcome.price as number,
-          point: outcome.point,
-          book: book.title,
-          eventId: event.id,
+          point: outcome.point as number | undefined,
+          book: book.title as string,
+          eventId: event.id as string,
+          lineMoved,
         };
       }
     }
@@ -281,7 +285,14 @@ export default function HomePage() {
   const liveStatuses = legs.map((leg) => {
     const live = findLiveOddsForLeg(leg);
     const currentOdds = live?.price ?? null;
-    const implied = currentOdds !== null ? americanToImpliedProb(currentOdds) : null;
+    const lineMoved = live?.lineMoved ?? false;
+    // Exact match → real implied. Line moved / missing → Hazard at 10%
+    let implied: number | null = null;
+    if (lineMoved) {
+      implied = 0.10;
+    } else if (currentOdds !== null) {
+      implied = americanToImpliedProb(currentOdds);
+    }
     return {
       leg,
       currentOdds,
@@ -289,6 +300,9 @@ export default function HomePage() {
       originalImpliedProb: americanToImpliedProb(leg.originalOdds),
       livePriceFound: !!live,
       book: live?.book,
+      lineMoved,
+      livePoint: live?.point,
+      isHazard: lineMoved || (implied !== null && implied <= 0.5),
     };
   });
 
@@ -299,6 +313,13 @@ export default function HomePage() {
     currentProbs.length === legs.length && legs.length > 0
       ? combinedProbability(currentProbs)
       : null;
+
+  function legStatusColor(implied: number | null, isHazard: boolean): string {
+    if (implied === null) return "bg-zinc-600";
+    if (isHazard || implied <= 0.5) return "bg-red-500";
+    if (implied >= 0.75) return "bg-emerald-500";
+    return "bg-amber-400";
+  }
 
   const health = getTicketHealth(combinedCurrentProb);
 
@@ -518,6 +539,20 @@ export default function HomePage() {
                     key={leg.id}
                     className="flex flex-wrap items-center justify-between gap-3 bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-4 py-3"
                   >
+                    {/* Per-leg status color box */}
+                    <div
+                      className={`w-2.5 h-10 rounded-sm shrink-0 ${legStatusColor(status.impliedProb, status.isHazard)}`}
+                      title={
+                        status.impliedProb === null
+                          ? "Unknown"
+                          : status.isHazard
+                          ? "Hazard"
+                          : status.impliedProb >= 0.75
+                          ? "Strong"
+                          : "Moderate"
+                      }
+                    />
+
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium">
                         {leg.awayTeam} @ {leg.homeTeam}
@@ -534,12 +569,27 @@ export default function HomePage() {
                       {status.livePriceFound ? (
                         <div>
                           <div className="text-sm font-mono">
-                            Live {formatAmericanOdds(status.currentOdds!)}
+                            {status.lineMoved ? (
+                              <span className="text-red-400">Hazard</span>
+                            ) : (
+                              <>Live {formatAmericanOdds(status.currentOdds!)}</>
+                            )}
+                            {status.lineMoved && status.livePoint !== undefined && (
+                              <span className="ml-1 text-xs text-amber-400 font-sans">
+                                (main {status.livePoint})
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-zinc-400">
-                            {formatPercent(status.impliedProb)} implied
-                            {status.book ? ` · ${status.book}` : ""}
+                            {formatPercent(status.impliedProb)}
+                            {status.lineMoved ? " forced" : " implied"}
+                            {!status.lineMoved && status.book ? ` · ${status.book}` : ""}
                           </div>
+                          {status.lineMoved && (
+                            <div className="text-[10px] text-red-400 mt-0.5">
+                              Original line not available
+                            </div>
+                          )}
                         </div>
                       ) : liveData ? (
                         <div className="text-xs text-amber-400">No match found</div>
