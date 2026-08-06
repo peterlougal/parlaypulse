@@ -23,6 +23,15 @@ const MARKETS: { key: MarketType; label: string }[] = [
   { key: "totals", label: "Total (O/U)" },
 ];
 
+const PILLAR_ODDS = [
+  500, 400, 350, 300, 250, 225, 200, 175, 150, 125, 100,
+  -110, -125, -145, -155, -165, -175, -185, -200, -250, -300, -350, -400, -500,
+];
+
+const BASEBALL_TOTALS = [
+  5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5,
+];
+
 interface ApiEvent {
   id: string;
   sport_key: string;
@@ -34,6 +43,21 @@ interface ApiEvent {
 
 function generateId() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function healthBarColor(prob: number | null): string {
+  if (prob === null) return "bg-zinc-700";
+  if (prob >= 0.6) return "bg-emerald-500";
+  if (prob >= 0.4) return "bg-lime-500";
+  if (prob >= 0.25) return "bg-yellow-500";
+  if (prob >= 0.12) return "bg-orange-500";
+  return "bg-red-500";
+}
+
+function healthBarWidth(prob: number | null): string {
+  if (prob === null) return "0%";
+  const pct = Math.min(100, Math.max(4, prob * 100));
+  return `${pct}%`;
 }
 
 export default function HomePage() {
@@ -114,7 +138,7 @@ export default function HomePage() {
   const addLeg = () => {
     const oddsNum = parseInt(originalOdds, 10);
     if (!selectedEvent || !selection || isNaN(oddsNum)) {
-      alert("Please select a game, a side, and enter valid American odds.");
+      alert("Please select a game, a side, and original odds.");
       return;
     }
 
@@ -205,7 +229,6 @@ export default function HomePage() {
 
       const sel = leg.selection.toLowerCase();
 
-      // 1) Prefer exact name + exact/near point
       let outcome = mkt.outcomes.find((o: any) => {
         const name = (o.name || "").toLowerCase();
         const nameMatch =
@@ -225,8 +248,6 @@ export default function HomePage() {
         return Math.abs(Number(pt) - Number(leg.point)) < 0.51;
       });
 
-      // 2) For totals/spreads: if no near-point match, take best name match anyway
-      //    (line may have moved)
       if (!outcome && (leg.market === "totals" || leg.market === "spreads")) {
         outcome = mkt.outcomes.find((o: any) => {
           const name = (o.name || "").toLowerCase();
@@ -339,6 +360,7 @@ export default function HomePage() {
                 onChange={(e) => {
                   setMarket(e.target.value as MarketType);
                   setSelection("");
+                  setPoint("");
                 }}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
               >
@@ -398,26 +420,48 @@ export default function HomePage() {
             </div>
 
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Original Odds (American)</label>
-              <input
-                type="text"
-                placeholder="-150 or +130"
+              <label className="block text-xs text-zinc-400 mb-1">Original Odds</label>
+              <select
                 value={originalOdds}
                 onChange={(e) => setOriginalOdds(e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              />
+              >
+                <option value="">Select odds…</option>
+                {PILLAR_ODDS.map((o) => (
+                  <option key={o} value={o}>
+                    {o > 0 ? `+${o}` : o}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {(market === "spreads" || market === "totals") && (
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">Point (spread / total line)</label>
-                <input
-                  type="text"
-                  placeholder={market === "spreads" ? "e.g. -1.5" : "e.g. 8.5"}
-                  value={point}
-                  onChange={(e) => setPoint(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+                <label className="block text-xs text-zinc-400 mb-1">
+                  {market === "totals" ? "Total Line" : "Spread Point"}
+                </label>
+                {market === "totals" && sport === "baseball_mlb" ? (
+                  <select
+                    value={point}
+                    onChange={(e) => setPoint(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="">Select total…</option>
+                    {BASEBALL_TOTALS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder={market === "spreads" ? "e.g. -1.5" : "e.g. 8.5"}
+                    value={point}
+                    onChange={(e) => setPoint(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                )}
               </div>
             )}
           </div>
@@ -522,6 +566,24 @@ export default function HomePage() {
               </div>
             )}
           </section>
+        )}
+
+        {/* Color health bar */}
+        {legs.length > 0 && (
+          <div className="px-1">
+            <div className="flex items-center justify-between text-xs text-zinc-500 mb-1.5">
+              <span>Ticket Health</span>
+              <span className="font-medium tabular-nums">
+                {formatPercent(combinedCurrentProb)}
+              </span>
+            </div>
+            <div className="h-3 w-full rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${healthBarColor(combinedCurrentProb)}`}
+                style={{ width: healthBarWidth(combinedCurrentProb) }}
+              />
+            </div>
+          </div>
         )}
 
         {legs.length > 0 && (
