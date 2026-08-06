@@ -264,7 +264,7 @@ export default function PropWatchPage() {
         const prop = mlbProps[id] || "hits_0.5";
         const prog = meta
           ? mlbProgress(prop, meta)
-          : { pct: 0, label: "Open MLB Tracker to refresh", hit: false, color: "bg-zinc-600" };
+          : { pct: 0, label: "Open MLB Tracker to refresh", hit: null as boolean | null, color: "bg-zinc-600" };
         list.push({
           id: `mlb-${id}`,
           sport: "MLB",
@@ -291,11 +291,114 @@ export default function PropWatchPage() {
           href: "/pga-groupings",
         });
       }
+
+      setItems(list);
+
+      // Live-enrich MLB favorites from Stats API (names + bars)
+      if (mlbFavs.length) {
+        (async () => {
+          try {
+            const today = new Date();
+            const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+            const schedRes = await fetch(
+              `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${dateStr}`
+            );
+            if (!schedRes.ok) return;
+            const sched = await schedRes.json();
+            const games: any[] = [];
+            for (const day of sched.dates || []) {
+              for (const g of day.games || []) games.push(g);
+            }
+            const byId: Record<string, any> = {};
+            for (const g of games) {
+              try {
+                const boxRes = await fetch(
+                  `https://statsapi.mlb.com/api/v1/game/${g.gamePk}/boxscore`
+                );
+                if (!boxRes.ok) continue;
+                const box = await boxRes.json();
+                const away = g.teams?.away?.team;
+                const home = g.teams?.home?.team;
+                for (const side of ["away", "home"] as const) {
+                  const teamData = box.teams?.[side];
+                  if (!teamData) continue;
+                  const teamAbbr =
+                    side === "away"
+                      ? away?.abbreviation || "AWY"
+                      : home?.abbreviation || "HME";
+                  const opponent =
+                    side === "away" ? home?.name || "Home" : away?.name || "Away";
+                  const playersMap = teamData.players || {};
+                  for (const key of Object.keys(playersMap)) {
+                    const pl = playersMap[key];
+                    const pid = pl?.person?.id;
+                    if (!pid) continue;
+                    const fullId = `${g.gamePk}-${pid}`;
+                    const batting = pl.stats?.batting || {};
+                    const pitching = pl.stats?.pitching || {};
+                    byId[fullId] = {
+                      name: pl.person?.fullName || `Player ${pid}`,
+                      team: teamAbbr,
+                      opponent,
+                      hits: Number(batting.hits) || 0,
+                      homeRuns: Number(batting.homeRuns) || 0,
+                      totalBases: Number(batting.totalBases) || 0,
+                      rbi: Number(batting.rbi) || 0,
+                      runs: Number(batting.runs) || 0,
+                      stolenBases: Number(batting.stolenBases) || 0,
+                      strikeOuts:
+                        Number(pitching.strikeOuts) ||
+                        Number(batting.strikeOuts) ||
+                        0,
+                    };
+                  }
+                }
+              } catch {
+                /* skip game */
+              }
+            }
+            // persist meta for next visit
+            try {
+              const existing = JSON.parse(
+                localStorage.getItem("pp-mlb-fav-meta") || "{}"
+              );
+              for (const id of mlbFavs) {
+                if (byId[id]) existing[id] = byId[id];
+              }
+              localStorage.setItem("pp-mlb-fav-meta", JSON.stringify(existing));
+            } catch {
+              /* ignore */
+            }
+            setItems((prev) =>
+              prev.map((item) => {
+                if (item.sport !== "MLB") return item;
+                const rawId = item.id.replace(/^mlb-/, "");
+                const meta = byId[rawId];
+                if (!meta) return item;
+                const prop =
+                  JSON.parse(localStorage.getItem("pp-mlb-fav-props") || "{}")[
+                    rawId
+                  ] || "hits_0.5";
+                const prog = mlbProgress(prop, meta);
+                return {
+                  ...item,
+                  title: meta.name,
+                  subtitle: `${meta.team} vs ${meta.opponent.split(" ").slice(-1)[0]}`,
+                  pct: prog.pct,
+                  barLabel: prog.label,
+                  hit: prog.hit,
+                  color: prog.color,
+                };
+              })
+            );
+          } catch {
+            /* ignore live enrich errors */
+          }
+        })();
+      }
     } catch {
       /* ignore */
     }
-
-    setItems(list);
   }, []);
 
   const bySport = {
