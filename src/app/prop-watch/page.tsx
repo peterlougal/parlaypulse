@@ -4,11 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 
 /**
- * Master Prop Watch — reads favorites from localStorage across sports pages.
- * Keys used elsewhere:
- *  - pp-mlb-favs, pp-mlb-fav-props
- *  - pp-nfl-favs, pp-nfl-fav-props, pp-nfl-line-favs
- *  - pp-golf-favs
+ * Master Prop Watch — favorites across sports + progress bars where possible.
  */
 
 type WatchItem = {
@@ -18,6 +14,10 @@ type WatchItem = {
   subtitle: string;
   propLabel?: string;
   href: string;
+  pct?: number;
+  barLabel?: string;
+  hit?: boolean | null;
+  color?: string;
 };
 
 const NFL_NAMES: Record<string, string> = {
@@ -45,27 +45,6 @@ const NFL_NAMES: Record<string, string> = {
   "ari-cb1": "Max Melton",
 };
 
-const NFL_PROP_LABELS: Record<string, string> = {
-  "pass_yds_225.5": "Pass Yds 225.5+",
-  "pass_td_1.5": "Pass TD 1.5+",
-  "rush_yds_45.5": "Rush Yds 45.5+",
-  "rush_yds_55.5": "Rush Yds 55.5+",
-  "rush_td_0.5": "Rush TD 0.5+",
-  "rec_yds_35.5": "Rec Yds 35.5+",
-  "rec_yds_45.5": "Rec Yds 45.5+",
-  "rec_yds_55.5": "Rec Yds 55.5+",
-  "receptions_3.5": "Receptions 3.5+",
-  "receptions_4.5": "Receptions 4.5+",
-  anytime_td: "Anytime TD",
-  "fg_1.5": "FG Made 1.5+",
-  "k_points_7.5": "K Points 7.5+",
-  "tackles_5.5": "Tackles 5.5+",
-  "tackles_6.5": "Tackles 6.5+",
-  "sacks_0.5": "Sacks 0.5+",
-  "int_0.5": "INT 0.5+",
-  "def_td_0.5": "Def / ST TD 0.5+",
-};
-
 const LINE_LABELS: Record<string, string> = {
   "car-ml": "Carolina ML",
   "ari-ml": "Arizona ML",
@@ -73,6 +52,8 @@ const LINE_LABELS: Record<string, string> = {
   "under-35.5": "Under 35.5",
   "car-spread": "Carolina -1.5",
   "ari-spread": "Arizona +1.5",
+  "car-def-td": "CAR Def / ST TD",
+  "ari-def-td": "ARI Def / ST TD",
 };
 
 const MLB_PROP_LABELS: Record<string, string> = {
@@ -95,6 +76,118 @@ const MLB_PROP_LABELS: Record<string, string> = {
   "k_6.5": "Ks 6.5+",
 };
 
+const PGA_NAMES: Record<string, string> = {
+  hossler: "Beau Hossler",
+  schmid: "Matti Schmid",
+  jsmith: "Jordan Smith",
+  jthomas: "Justin Thomas",
+  theegala: "Sahith Theegala",
+  matsuyama: "Hideki Matsuyama",
+  spieth: "Jordan Spieth",
+  // ids from groupings page — extend as needed
+};
+
+function mlbProgress(
+  prop: string,
+  meta: {
+    hits: number;
+    homeRuns: number;
+    totalBases: number;
+    rbi: number;
+    runs: number;
+    stolenBases: number;
+    strikeOuts: number;
+  }
+): { pct: number; label: string; hit: boolean; color: string } {
+  const map: Record<string, { cur: number; need: number }> = {
+    hits_0.5: { cur: meta.hits, need: 1 },
+    hits_1.5: { cur: meta.hits, need: 2 },
+    hits_2.5: { cur: meta.hits, need: 3 },
+    hr_0.5: { cur: meta.homeRuns, need: 1 },
+    hr_1.5: { cur: meta.homeRuns, need: 2 },
+    tb_1.5: { cur: meta.totalBases, need: 2 },
+    tb_2.5: { cur: meta.totalBases, need: 3 },
+    tb_3.5: { cur: meta.totalBases, need: 4 },
+    rbi_0.5: { cur: meta.rbi, need: 1 },
+    rbi_1.5: { cur: meta.rbi, need: 2 },
+    runs_0.5: { cur: meta.runs, need: 1 },
+    runs_1.5: { cur: meta.runs, need: 2 },
+    sb_0.5: { cur: meta.stolenBases, need: 1 },
+    k_3.5: { cur: meta.strikeOuts, need: 4 },
+    k_4.5: { cur: meta.strikeOuts, need: 5 },
+    k_5.5: { cur: meta.strikeOuts, need: 6 },
+    k_6.5: { cur: meta.strikeOuts, need: 7 },
+  };
+  const m = map[prop] || { cur: 0, need: 1 };
+  const hit = m.cur >= m.need;
+  const pct = Math.min(100, Math.round((m.cur / m.need) * 100));
+  const color = hit ? "bg-emerald-500" : pct >= 67 ? "bg-emerald-400" : pct >= 34 ? "bg-amber-400" : "bg-red-500";
+  return {
+    pct: hit ? 100 : pct,
+    label: `${m.cur} / need ${m.need}${hit ? " · HIT" : ""}`,
+    hit,
+    color,
+  };
+}
+
+function lineBar(
+  id: string,
+  car: number,
+  ari: number,
+  final: boolean
+): { pct: number; label: string; hit: boolean | null; color: string } {
+  const total = car + ari;
+  const margin = car - ari;
+  if (id === "over-35.5") {
+    const need = 36;
+    const pct = Math.min(100, Math.round((total / need) * 100));
+    const hit = total > 35.5;
+    return {
+      pct: hit ? 100 : pct,
+      label: `${total} pts · need > 35.5`,
+      hit: final ? hit : hit ? true : null,
+      color: hit ? "bg-emerald-500" : pct >= 70 ? "bg-amber-400" : "bg-cyan-500",
+    };
+  }
+  if (id === "under-35.5") {
+    const pctUsed = Math.min(100, Math.round((total / 35.5) * 100));
+    const busted = total > 35.5;
+    const hit = total < 35.5;
+    return {
+      pct: busted ? 100 : pctUsed,
+      label: busted ? `BUSTED · ${total}` : `${total} pts · under 35.5`,
+      hit: final ? hit : busted ? false : null,
+      color: busted ? "bg-red-500" : pctUsed >= 85 ? "bg-amber-400" : "bg-cyan-500",
+    };
+  }
+  if (id === "car-ml" || id === "ari-ml") {
+    const team = id.startsWith("car") ? "CAR" : "ARI";
+    const winning = team === "CAR" ? margin > 0 : margin < 0;
+    if (car === 0 && ari === 0)
+      return { pct: 0, label: "Pregame", hit: null, color: "bg-zinc-600" };
+    return {
+      pct: winning ? 70 : 20,
+      label: `${car}–${ari}`,
+      hit: final ? winning : null,
+      color: winning ? "bg-emerald-400" : "bg-red-400",
+    };
+  }
+  if (id.includes("spread")) {
+    const carCovers = margin > 1.5;
+    const ariCovers = -margin < 1.5;
+    const covers = id.startsWith("car") ? carCovers : ariCovers;
+    if (car === 0 && ari === 0)
+      return { pct: 0, label: "Pregame", hit: null, color: "bg-zinc-600" };
+    return {
+      pct: covers ? 70 : 25,
+      label: `${car}–${ari}`,
+      hit: final ? covers : null,
+      color: covers ? "bg-emerald-400" : "bg-amber-400",
+    };
+  }
+  return { pct: 0, label: "Manual track", hit: null, color: "bg-zinc-600" };
+}
+
 export default function PropWatchPage() {
   const [items, setItems] = useState<WatchItem[]>([]);
   const [mounted, setMounted] = useState(false);
@@ -104,57 +197,96 @@ export default function PropWatchPage() {
     const list: WatchItem[] = [];
 
     try {
-      // NFL players
+      const nflPropLabels: Record<string, string> = JSON.parse(
+        localStorage.getItem("pp-nfl-prop-labels") || "{}"
+      );
       const nflFavs: string[] = JSON.parse(localStorage.getItem("pp-nfl-favs") || "[]");
       const nflProps: Record<string, string> = JSON.parse(
         localStorage.getItem("pp-nfl-fav-props") || "{}"
       );
       for (const id of nflFavs) {
+        const prop = nflProps[id];
         list.push({
           id: `nfl-${id}`,
           sport: "NFL",
           title: NFL_NAMES[id] || id,
           subtitle: "Hall of Fame Game · CAR vs ARI",
-          propLabel: NFL_PROP_LABELS[nflProps[id]] || nflProps[id] || "Prop selected on NFL page",
+          propLabel:
+            nflPropLabels[prop] ||
+            prop?.replace(/_/g, " ") ||
+            "Prop on NFL page",
           href: "/nfl-tracker",
+          pct: 0,
+          barLabel: "Live player stats after kickoff feed",
+          color: "bg-zinc-600",
         });
       }
 
-      // NFL lines
       const lineFavs: string[] = JSON.parse(localStorage.getItem("pp-nfl-line-favs") || "[]");
+      const score = JSON.parse(localStorage.getItem("pp-nfl-score") || '{"car":0,"ari":0,"final":false}');
       for (const id of lineFavs) {
+        const bar = lineBar(id, score.car || 0, score.ari || 0, !!score.final);
         list.push({
           id: `line-${id}`,
           sport: "LINE",
           title: LINE_LABELS[id] || id,
           subtitle: "NFL · CAR vs ARI game line",
           href: "/nfl-tracker",
+          pct: bar.pct,
+          barLabel: bar.label,
+          hit: bar.hit,
+          color: bar.color,
         });
       }
 
-      // MLB — we only store ids; names require live reload. Show keys + link back.
       const mlbFavs: string[] = JSON.parse(localStorage.getItem("pp-mlb-favs") || "[]");
       const mlbProps: Record<string, string> = JSON.parse(
         localStorage.getItem("pp-mlb-fav-props") || "{}"
       );
+      const mlbMeta: Record<
+        string,
+        {
+          name: string;
+          team: string;
+          opponent: string;
+          hits: number;
+          homeRuns: number;
+          totalBases: number;
+          rbi: number;
+          runs: number;
+          stolenBases: number;
+          strikeOuts: number;
+        }
+      > = JSON.parse(localStorage.getItem("pp-mlb-fav-meta") || "{}");
+
       for (const id of mlbFavs) {
+        const meta = mlbMeta[id];
+        const prop = mlbProps[id] || "hits_0.5";
+        const prog = meta
+          ? mlbProgress(prop, meta)
+          : { pct: 0, label: "Open MLB Tracker to refresh", hit: false, color: "bg-zinc-600" };
         list.push({
           id: `mlb-${id}`,
           sport: "MLB",
-          title: `Player ${id.split("-").slice(-1)[0]}`,
-          subtitle: "Open MLB Tracker for live name + progress bar",
-          propLabel: MLB_PROP_LABELS[mlbProps[id]] || mlbProps[id],
+          title: meta?.name || `Player ${id.split("-").pop()}`,
+          subtitle: meta
+            ? `${meta.team} vs ${meta.opponent.split(" ").slice(-1)[0]}`
+            : "Open MLB Tracker for live name + progress bar",
+          propLabel: MLB_PROP_LABELS[prop] || prop,
           href: "/mlb-tracker",
+          pct: prog.pct,
+          barLabel: prog.label,
+          hit: prog.hit,
+          color: prog.color,
         });
       }
 
-      // PGA
       const golfFavs: string[] = JSON.parse(localStorage.getItem("pp-golf-favs") || "[]");
       for (const id of golfFavs) {
         list.push({
           id: `pga-${id}`,
           sport: "PGA",
-          title: `Golfer ${id}`,
+          title: PGA_NAMES[id] || `Golfer ${id}`,
           subtitle: "Open PGA Groupings for score / thru",
           href: "/pga-groupings",
         });
@@ -203,23 +335,19 @@ export default function PropWatchPage() {
         <section className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6">
           <h2 className="text-xl font-semibold">Multi-Sport Prop Watch</h2>
           <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
-            Everything you&apos;ve starred across MLB, NFL, PGA, and game lines — one place.
-            Star players on each sport page; they show up here automatically on this device.
+            Everything you&apos;ve starred — with progress bars for MLB stats and NFL game lines.
+            Refresh sport pages to keep bars current.
           </p>
-          {!mounted && (
-            <p className="text-xs text-zinc-600 mt-2">Loading favorites…</p>
-          )}
         </section>
 
         {mounted && items.length === 0 && (
           <div className="text-center text-zinc-500 py-16 space-y-3">
             <p>No favorites yet.</p>
             <p className="text-sm">
-              Go to{" "}
+              Star players on{" "}
               <Link href="/mlb-tracker" className="text-emerald-400">MLB</Link>,{" "}
               <Link href="/nfl-tracker" className="text-emerald-400">NFL</Link>, or{" "}
-              <Link href="/pga-groupings" className="text-emerald-400">PGA</Link>{" "}
-              and star players or game lines.
+              <Link href="/pga-groupings" className="text-emerald-400">PGA</Link>.
             </p>
           </div>
         )}
@@ -237,19 +365,44 @@ export default function PropWatchPage() {
                   <Link
                     key={item.id}
                     href={item.href}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/40 transition"
+                    className="block px-4 py-3 hover:bg-zinc-800/40 transition"
                   >
-                    <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
-                      {item.sport}
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
+                        {item.sport}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate flex items-center gap-2">
+                          {item.title}
+                          {item.hit === true && (
+                            <span className="text-[10px] text-emerald-400 font-semibold">HIT</span>
+                          )}
+                          {item.hit === false && (
+                            <span className="text-[10px] text-red-400 font-semibold">MISS</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 truncate">{item.subtitle}</div>
+                        {item.propLabel && (
+                          <div className="text-xs text-emerald-400/90 mt-0.5">{item.propLabel}</div>
+                        )}
+                      </div>
+                      <span className="text-zinc-600 text-sm">→</span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{item.title}</div>
-                      <div className="text-[11px] text-zinc-500 truncate">{item.subtitle}</div>
-                      {item.propLabel && (
-                        <div className="text-xs text-emerald-400/90 mt-0.5">{item.propLabel}</div>
-                      )}
-                    </div>
-                    <span className="text-zinc-600 text-sm">→</span>
+                    {typeof item.pct === "number" && (
+                      <div className="mt-2 ml-13 pl-[52px]">
+                        <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${item.color || "bg-cyan-500"}`}
+                            style={{
+                              width: `${Math.max(item.pct, item.pct > 0 ? 4 : 0)}%`,
+                            }}
+                          />
+                        </div>
+                        {item.barLabel && (
+                          <div className="text-[10px] text-zinc-500 mt-1">{item.barLabel}</div>
+                        )}
+                      </div>
+                    )}
                   </Link>
                 ))}
               </div>
@@ -258,8 +411,8 @@ export default function PropWatchPage() {
         })}
 
         <footer className="text-center text-xs text-zinc-600 pt-4 pb-6">
-          Favorites are stored in this browser only for now. Cross-device accounts come later with
-          the subscription tier.
+          MLB bars use last stats from MLB Tracker. Visit MLB Tracker to refresh names/stats, then
+          reopen Prop Watch.
         </footer>
       </main>
     </div>
