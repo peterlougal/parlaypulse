@@ -201,24 +201,44 @@ export default function HomePage() {
 
     for (const book of event.bookmakers || []) {
       const mkt = book.markets?.find((m: any) => m.key === leg.market);
-      if (!mkt) continue;
+      if (!mkt || !mkt.outcomes) continue;
 
-      const outcome = mkt.outcomes?.find((o: any) => {
+      const sel = leg.selection.toLowerCase();
+
+      // 1) Prefer exact name + exact/near point
+      let outcome = mkt.outcomes.find((o: any) => {
         const name = (o.name || "").toLowerCase();
-        const sel = leg.selection.toLowerCase();
+        const nameMatch =
+          name === sel ||
+          name.includes(sel) ||
+          sel.includes(name) ||
+          (sel === "over" && name.startsWith("over")) ||
+          (sel === "under" && name.startsWith("under"));
 
-        if (leg.market === "h2h") {
-          return name === sel || name.includes(sel) || sel.includes(name);
-        }
-        if (leg.market === "spreads" || leg.market === "totals") {
-          const pointMatch =
-            leg.point === undefined ||
-            o.point === leg.point ||
-            Math.abs((o.point || 0) - (leg.point || 0)) < 0.1;
-          return (name === sel || name.includes(sel) || sel.includes(name)) && pointMatch;
-        }
-        return false;
+        if (!nameMatch) return false;
+
+        if (leg.market === "h2h") return true;
+
+        if (leg.point === undefined) return true;
+        const pt = o.point;
+        if (pt === undefined || pt === null) return true;
+        return Math.abs(Number(pt) - Number(leg.point)) < 0.51;
       });
+
+      // 2) For totals/spreads: if no near-point match, take best name match anyway
+      //    (line may have moved)
+      if (!outcome && (leg.market === "totals" || leg.market === "spreads")) {
+        outcome = mkt.outcomes.find((o: any) => {
+          const name = (o.name || "").toLowerCase();
+          return (
+            name === sel ||
+            name.includes(sel) ||
+            sel.includes(name) ||
+            (sel === "over" && name.startsWith("over")) ||
+            (sel === "under" && name.startsWith("under"))
+          );
+        });
+      }
 
       if (outcome) {
         return {
