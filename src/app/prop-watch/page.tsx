@@ -408,6 +408,43 @@ export default function PropWatchPage() {
     PGA: items.filter((i) => i.sport === "PGA"),
   };
 
+  // Ticket health = average progress across all tracked legs
+  // HIT = 100, MISS = 0, in-progress uses pct, missing data skipped
+  const scored = items.filter((i) => typeof i.pct === "number" || i.hit === true || i.hit === false);
+  let health: number | null = null;
+  let hits = 0;
+  let misses = 0;
+  let live = 0;
+  if (scored.length > 0) {
+    const sum = scored.reduce((acc, i) => {
+      if (i.hit === true) {
+        hits += 1;
+        return acc + 100;
+      }
+      if (i.hit === false) {
+        misses += 1;
+        return acc + 0;
+      }
+      live += 1;
+      return acc + (typeof i.pct === "number" ? i.pct : 0);
+    }, 0);
+    health = Math.round(sum / scored.length);
+  }
+
+  function healthColor(h: number) {
+    if (h >= 75) return "text-emerald-400";
+    if (h >= 50) return "text-amber-400";
+    if (h >= 25) return "text-orange-400";
+    return "text-red-400";
+  }
+
+  function healthBarColor(h: number) {
+    if (h >= 75) return "bg-emerald-500";
+    if (h >= 50) return "bg-amber-400";
+    if (h >= 25) return "bg-orange-400";
+    return "bg-red-500";
+  }
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur sticky top-0 z-10">
@@ -435,12 +472,41 @@ export default function PropWatchPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        <section className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6">
-          <h2 className="text-xl font-semibold">Multi-Sport Prop Watch</h2>
-          <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
-            Everything you&apos;ve starred — with progress bars for MLB stats and NFL game lines.
-            Refresh sport pages to keep bars current.
-          </p>
+        <section className="grid gap-4 md:grid-cols-[1fr_auto]">
+          <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5">
+            <h2 className="text-lg font-semibold">Multi-Sport Prop Watch</h2>
+            <p className="text-sm text-zinc-400 mt-1">
+              Starred legs only — clean view. Pick props on NFL / MLB / PGA pages.
+            </p>
+            {items.length > 0 && (
+              <p className="text-xs text-zinc-600 mt-2">
+                {items.length} leg{items.length === 1 ? "" : "s"}
+                {hits ? ` · ${hits} hit` : ""}
+                {misses ? ` · ${misses} miss` : ""}
+                {live ? ` · ${live} live` : ""}
+              </p>
+            )}
+          </div>
+          <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 min-w-[160px] flex flex-col items-center justify-center text-center">
+            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Ticket Health
+            </div>
+            {health === null ? (
+              <div className="text-3xl font-bold text-zinc-600 mt-1">—</div>
+            ) : (
+              <>
+                <div className={`text-4xl font-bold mt-1 tabular-nums ${healthColor(health)}`}>
+                  {health}%
+                </div>
+                <div className="w-full h-2 rounded-full bg-zinc-800 mt-3 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${healthBarColor(health)}`}
+                    style={{ width: `${health}%` }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </section>
 
         {mounted && items.length === 0 && (
