@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import Link from "next/link";
 import {
   americanToImpliedProb,
   calculateParlayPayout,
@@ -379,14 +380,24 @@ export default function HomePage() {
     <div className="min-h-screen">
       <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center font-bold text-zinc-950 text-lg">
-              P
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center font-bold text-zinc-950 text-lg">
+                P
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight">ParlayPulse</h1>
+                <p className="text-xs text-zinc-500">Live ticket health & hedge tool</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">ParlayPulse</h1>
-              <p className="text-xs text-zinc-500">Live ticket health & hedge tool</p>
-            </div>
+            <nav className="hidden sm:flex gap-4 text-sm">
+              <Link href="/" className="text-emerald-400 font-medium">
+                Ticket Health
+              </Link>
+              <Link href="/save-the-unit" className="text-zinc-400 hover:text-white transition">
+                Save the Unit
+              </Link>
+            </nav>
           </div>
           <div className="text-right text-xs text-zinc-500">
             {creditsRemaining && <div>Credits left: {creditsRemaining}</div>}
@@ -752,6 +763,19 @@ export default function HomePage() {
                   Ticket is under heavy pressure. Many bettors use this window to hedge remaining
                   legs or free up bankroll for new action.
                 </p>
+              )}
+              {combinedCurrentProb !== null && combinedCurrentProb < 0.35 && (
+                <div className="mt-5">
+                  <Link
+                    href="/save-the-unit"
+                    className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition"
+                  >
+                    Save the Unit →
+                  </Link>
+                  <p className="text-xs text-zinc-500 mt-2">
+                    See live options built to help recover your stake from heavy favorites.
+                  </p>
+                </div>
               )}
             </div>
           </section>
